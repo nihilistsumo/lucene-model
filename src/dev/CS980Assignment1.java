@@ -27,6 +27,7 @@ import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.similarities.BM25Similarity;
 import org.apache.lucene.search.similarities.BasicStats;
 import org.apache.lucene.search.similarities.SimilarityBase;
 import org.apache.lucene.store.Directory;
@@ -98,6 +99,8 @@ public class CS980Assignment1 {
 		HashMap<String, Float> retrievedResult = new HashMap<String, Float>();
 		if (is == null) {
 			is = new IndexSearcher(DirectoryReader.open(FSDirectory.open((new File(INDEX_DIR).toPath()))));
+			// here you set the similarity for the searcher
+			is.setSimilarity(new BM25Similarity());
 		}
 
 		if (customScore) {
