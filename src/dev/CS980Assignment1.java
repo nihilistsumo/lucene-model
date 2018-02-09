@@ -9,6 +9,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 
@@ -35,6 +36,7 @@ import org.apache.lucene.store.FSDirectory;
 
 import co.nstant.in.cbor.CborException;
 import edu.unh.cs.treccar_v2.Data;
+import edu.unh.cs.treccar_v2.Data.Page.SectionPathParagraphs;
 import edu.unh.cs.treccar_v2.read_data.DeserializeData;
 
 public class CS980Assignment1 {
@@ -46,13 +48,14 @@ public class CS980Assignment1 {
 	static int RET_NO;
 	static String PAGE_OR_SEC;
 	static String DO_INDEX;
+	static String HEAD_PART;
 	BufferedWriter runFileWriter;
 
 	private IndexSearcher is = null;
 	private QueryParser qp = null;
 	private boolean customScore = false;
 	
-	public CS980Assignment1(String ind, String para, String out, String run, String retN, String mode, String i){
+	public CS980Assignment1(String ind, String para, String out, String run, String retN, String mode, String i, String head){
 		INDEX_DIR = ind;
 		CBOR_PARA_FILE = para;
 		CBOR_OUTLINE_FILE = out;
@@ -60,6 +63,7 @@ public class CS980Assignment1 {
 		RET_NO = Integer.parseInt(retN);
 		PAGE_OR_SEC = mode;
 		DO_INDEX = i;
+		HEAD_PART = head;
 		FileWriter fw;
 		try {
 			fw = new FileWriter(new File(TRECEVAL_RUN));
@@ -138,9 +142,9 @@ public class CS980Assignment1 {
 		Document d;
 		for (int i = 0; i < retDocs.length; i++) {
 			d = is.doc(retDocs[i].doc);
-			System.out.println("Doc " + i);
-			System.out.println("Score " + tds.scoreDocs[i].score);
-			System.out.println(d.getField("paraid").stringValue());
+			//System.out.println("Doc " + i);
+			//System.out.println("Score " + tds.scoreDocs[i].score);
+			//System.out.println(d.getField("paraid").stringValue());
 			//System.out.println(d.getField("parabody").stringValue() + "\n");
 			retrievedResult.put(d.getField("paraid").stringValue(), tds.scoreDocs[i].score);
 		}
@@ -158,6 +162,12 @@ public class CS980Assignment1 {
 			final Iterator<Data.Page> pageIt = DeserializeData.iterAnnotations(fis);
 			for(int i=0; pageIt.hasNext(); i++){
 				Data.Page page = pageIt.next();
+				//List<List<Data.Section>> paths = page.flatSectionPaths();
+				HashSet<String> allSecIDsInPage = getAllSectionIDs(page);
+				String pageQ = page.getPageName();
+				for(String secid:allSecIDsInPage)
+					pageQ = pageQ + "/" + secid;
+				pageQ = pageQ.replaceAll("[/,%20]", " ").replaceAll("enwiki:", "");
 				HashMap<String, Float> result = this.doSearch(page.getPageName(), RET_NO);
 				resultSet.put(page.getPageId(), result);
 			}
@@ -175,11 +185,15 @@ public class CS980Assignment1 {
 			final Iterator<Data.Page> pageIt = DeserializeData.iterAnnotations(fis);
 			for(int i=0; pageIt.hasNext(); i++){
 				Data.Page page = pageIt.next();
-				for(Data.Section sec:this.getAllSections(page)){
+				HashSet<String> secIDList = this.getAllSectionIDs(page);
+				for(String secID:secIDList){
 					//System.out.println(sec.getHeading());
 					//System.out.println(sec.getHeadingId());
-					HashMap<String, Float> result = this.doSearch(sec.getHeadingId().replaceAll("/", " "), RET_NO);
-					resultSet.put(page.getPageId()+"/"+sec.getHeadingId(), result);
+					
+					// use HEAD_PART to form different part of query
+					String secQ = secID.replaceAll("[/,%20]", " ").replaceAll("enwiki:", "");
+					HashMap<String, Float> result = this.doSearch(secQ, RET_NO);
+					resultSet.put(secID, result);
 				}
 			}
 			this.printTrecevalRun(resultSet, "SECTION", this.runFileWriter);
@@ -211,6 +225,21 @@ public class CS980Assignment1 {
 		return secList;
 	}
 	
+	public HashSet<String> getAllSectionIDs(Data.Page page){
+		HashSet<String> secIDList = new HashSet<String>();
+		String parent = page.getPageId();
+		/*
+		for(List<Data.Section> seclist:page.flatSectionPaths()){
+			for(Data.Section sec:seclist){
+				addSectionIDToList(sec, secIDList, parent);
+			}
+		}
+		*/
+		for(Data.Section sec:page.getChildSections())
+			addSectionIDToList(sec, secIDList, parent);
+		return secIDList;
+	}
+	
 	private void addSectionToList(Data.Section sec, ArrayList<Data.Section> secList){
 		if(sec.getChildSections() == null || sec.getChildSections().size() == 0)
 			secList.add(sec);
@@ -218,6 +247,18 @@ public class CS980Assignment1 {
 			for(Data.Section child:sec.getChildSections())
 				addSectionToList(child, secList);
 			secList.add(sec);
+		}
+	}
+	
+	private void addSectionIDToList(Data.Section sec, HashSet<String> idlist, String parent){
+		if(sec.getChildSections() == null || sec.getChildSections().size() == 0){
+			idlist.add(parent+"/"+sec.getHeadingId());
+		}
+		else{
+			idlist.add(parent+"/"+sec.getHeadingId());
+			parent = parent+"/"+sec.getHeadingId();
+			for(Data.Section child:sec.getChildSections())
+				addSectionIDToList(child, idlist, parent);
 		}
 	}
 	
@@ -232,7 +273,12 @@ public class CS980Assignment1 {
 
 	public static void main(String[] args) {
 		// args = index file, para file, outline file, treceval run, no of ret, page or sec, index or not
-		CS980Assignment1 a = new CS980Assignment1(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
+		if(args.length != 8){
+			System.out.println("Usage: \n java -jar lucene-ret-model-v[n].jar "
+					+ "index file, para file, outline file, treceval run, no of ret, page or sec, index or not, top/middle/deep section");
+			System.exit(0);
+		}
+		CS980Assignment1 a = new CS980Assignment1(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
 		/*
 		int topSearch = 10;
 		String[] queryArr = { "power nap benefits", "whale vocalization production of sound", "pokemon puzzle league" };
